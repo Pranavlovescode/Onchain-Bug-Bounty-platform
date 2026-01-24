@@ -1,0 +1,20 @@
+[toolchain]
+package_manager = "yarn"
+anchor_version = "0.32.1"
+
+[features]
+resolution = true
+skip-lint = false
+
+[programs.localnet]
+bug_bounty_platform = "7CjDDSGfTDYAydZ3nSamXbahqsaapDY862PQQaVJwiw2"
+
+[registry]
+url = "https://api.apr.dev"
+
+[provider]
+cluster = "localnet"
+wallet = "/home/deilsy/pUfk7BT6joQUgqQQGfEd9Pq7NyxPd24bzBniKDeWhsx.json"
+
+[scripts]
+test = "yarn run ts-mocha -p ./tsconfig.json -t 1000000 \"tests/**/*.ts\""
