@@ -1,0 +1,81 @@
+@import "@solana/wallet-adapter-react-ui/styles.css";
+@import "tailwindcss";
+
+/* Solana Wallet Adapter Styles */
+
+
+/* Root variables */
+:root {
+  color-scheme: dark;
+}
+
+/* Smooth scrolling */
+html {
+  scroll-behavior: smooth;
+}
+
+/* Global typography */
+body {
+  background-color: rgb(17, 24, 39);
+  color: rgb(243, 244, 246);
+  font-family: system-ui, -apple-system, sans-serif;
+}
+
+/* Utility classes */
+.container {
+  max-width: 80rem;
+  margin-left: auto;
+  margin-right: auto;
+  padding-left: 1rem;
+  padding-right: 1rem;
+}
+
+/* Scrollbar styling */
+::-webkit-scrollbar {
+  width: 8px;
+  height: 8px;
+}
+
+::-webkit-scrollbar-track {
+  background: rgb(31, 41, 55);
+}
+
+::-webkit-scrollbar-thumb {
+  background: rgb(75, 85, 99);
+  border-radius: 4px;
+}
+
+::-webkit-scrollbar-thumb:hover {
+  background: rgb(107, 114, 128);
+}
+
+/* Selection color */
+::selection {
+  background-color: rgb(37, 99, 235);
+  color: rgb(255, 255, 255);
+}
+
+/* Focus visible for accessibility */
+:focus-visible {
+  outline: 2px solid rgb(59, 130, 246);
+  outline-offset: 2px;
+}
+
+/* Smooth transitions */
+* {
+  transition-property: color, background-color, border-color;
+  transition-timing-function: cubic-bezier(0.4, 0, 0.2, 1);
+  transition-duration: 200ms;
+}
+
+/* Link styling */
+a {
+  color: rgb(96, 165, 250);
+  transition-property: color;
+  transition-timing-function: cubic-bezier(0.4, 0, 0.2, 1);
+  transition-duration: 200ms;
+}
+a:hover {
+  color: rgb(147, 197, 253);
+}
+

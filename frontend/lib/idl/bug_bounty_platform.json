@@ -1,0 +1,790 @@
+{
+  "address": "7CjDDSGfTDYAydZ3nSamXbahqsaapDY862PQQaVJwiw2",
+  "metadata": {
+    "name": "bug_bounty_platform",
+    "version": "0.1.0",
+    "spec": "0.1.0",
+    "description": "Created with Anchor"
+  },
+  "instructions": [
+    {
+      "name": "approve_report",
+      "docs": [
+        "Governance approves a vulnerability report (requires governance authority)"
+      ],
+      "discriminator": [
+        73,
+        72,
+        145,
+        7,
+        164,
+        255,
+        168,
+        194
+      ],
+      "accounts": [
+        {
+          "name": "governance_authority",
+          "signer": true
+        },
+        {
+          "name": "vault"
+        },
+        {
+          "name": "report",
+          "writable": true
+        }
+      ],
+      "args": [
+        {
+          "name": "approval_reason",
+          "type": {
+            "option": "string"
+          }
+        }
+      ]
+    },
+    {
+      "name": "create_bounty_vault",
+      "docs": [
+        "Initialize a new bug bounty vault"
+      ],
+      "discriminator": [
+        76,
+        153,
+        137,
+        76,
+        149,
+        208,
+        102,
+        68
+      ],
+      "accounts": [
+        {
+          "name": "program_team",
+          "writable": true,
+          "signer": true
+        },
+        {
+          "name": "governance_authority"
+        },
+        {
+          "name": "vault",
+          "writable": true,
+          "pda": {
+            "seeds": [
+              {
+                "kind": "const",
+                "value": [
+                  118,
+                  97,
+                  117,
+                  108,
+                  116
+                ]
+              },
+              {
+                "kind": "account",
+                "path": "program_team"
+              }
+            ]
+          }
+        },
+        {
+          "name": "vault_token_account"
+        },
+        {
+          "name": "system_program",
+          "address": "11111111111111111111111111111111"
+        },
+        {
+          "name": "token_program",
+          "address": "TokenkegQfeZyiNwAJbNbGKPFXCWuBvf9Ss623VQ5DA"
+        }
+      ],
+      "args": [
+        {
+          "name": "critical_reward",
+          "type": "u64"
+        },
+        {
+          "name": "high_reward",
+          "type": "u64"
+        },
+        {
+          "name": "medium_reward",
+          "type": "u64"
+        },
+        {
+          "name": "low_reward",
+          "type": "u64"
+        },
+        {
+          "name": "initial_funding",
+          "type": "u64"
+        },
+        {
+          "name": "reward_token_mint",
+          "type": {
+            "option": "pubkey"
+          }
+        }
+      ]
+    },
+    {
+      "name": "execute_payout",
+      "docs": [
+        "Execute automatic payout after approval"
+      ],
+      "discriminator": [
+        12,
+        35,
+        52,
+        7,
+        95,
+        19,
+        169,
+        21
+      ],
+      "accounts": [
+        {
+          "name": "researcher",
+          "writable": true,
+          "signer": true
+        },
+        {
+          "name": "vault"
+        },
+        {
+          "name": "report",
+          "writable": true
+        },
+        {
+          "name": "vault_token_account",
+          "writable": true
+        },
+        {
+          "name": "researcher_token_account",
+          "writable": true
+        },
+        {
+          "name": "vault_authority"
+        },
+        {
+          "name": "token_program",
+          "address": "TokenkegQfeZyiNwAJbNbGKPFXCWuBvf9Ss623VQ5DA"
+        }
+      ],
+      "args": []
+    },
+    {
+      "name": "fund_vault",
+      "docs": [
+        "Allow vault to receive additional funding"
+      ],
+      "discriminator": [
+        26,
+        33,
+        207,
+        242,
+        119,
+        108,
+        134,
+        73
+      ],
+      "accounts": [
+        {
+          "name": "funder",
+          "writable": true,
+          "signer": true
+        },
+        {
+          "name": "vault",
+          "writable": true
+        },
+        {
+          "name": "funder_token_account",
+          "writable": true
+        },
+        {
+          "name": "vault_token_account",
+          "writable": true
+        },
+        {
+          "name": "token_program",
+          "address": "TokenkegQfeZyiNwAJbNbGKPFXCWuBvf9Ss623VQ5DA"
+        }
+      ],
+      "args": [
+        {
+          "name": "amount",
+          "type": "u64"
+        }
+      ]
+    },
+    {
+      "name": "mint_reputation_nft",
+      "docs": [
+        "Mint reputation NFT for approved reports (optional)"
+      ],
+      "discriminator": [
+        240,
+        117,
+        21,
+        198,
+        77,
+        214,
+        150,
+        128
+      ],
+      "accounts": [
+        {
+          "name": "researcher",
+          "writable": true,
+          "signer": true
+        },
+        {
+          "name": "report"
+        },
+        {
+          "name": "reputation_nft",
+          "writable": true,
+          "pda": {
+            "seeds": [
+              {
+                "kind": "const",
+                "value": [
+                  114,
+                  101,
+                  112,
+                  117,
+                  116,
+                  97,
+                  116,
+                  105,
+                  111,
+                  110
+                ]
+              },
+              {
+                "kind": "account",
+                "path": "report.researcher",
+                "account": "VulnerabilityReport"
+              },
+              {
+                "kind": "account",
+                "path": "report"
+              }
+            ]
+          }
+        },
+        {
+          "name": "system_program",
+          "address": "11111111111111111111111111111111"
+        }
+      ],
+      "args": [
+        {
+          "name": "project_name",
+          "type": "string"
+        }
+      ]
+    },
+    {
+      "name": "reject_report",
+      "docs": [
+        "Governance rejects a vulnerability report"
+      ],
+      "discriminator": [
+        248,
+        48,
+        152,
+        198,
+        75,
+        73,
+        34,
+        17
+      ],
+      "accounts": [
+        {
+          "name": "governance_authority",
+          "signer": true
+        },
+        {
+          "name": "vault"
+        },
+        {
+          "name": "report",
+          "writable": true
+        }
+      ],
+      "args": [
+        {
+          "name": "rejection_reason",
+          "type": "string"
+        }
+      ]
+    },
+    {
+      "name": "submit_report",
+      "docs": [
+        "Submit a vulnerability report"
+      ],
+      "discriminator": [
+        27,
+        178,
+        64,
+        9,
+        20,
+        46,
+        250,
+        14
+      ],
+      "accounts": [
+        {
+          "name": "researcher",
+          "writable": true,
+          "signer": true
+        },
+        {
+          "name": "vault",
+          "writable": true
+        },
+        {
+          "name": "report",
+          "writable": true,
+          "pda": {
+            "seeds": [
+              {
+                "kind": "const",
+                "value": [
+                  114,
+                  101,
+                  112,
+                  111,
+                  114,
+                  116
+                ]
+              },
+              {
+                "kind": "account",
+                "path": "vault"
+              },
+              {
+                "kind": "account",
+                "path": "researcher"
+              },
+              {
+                "kind": "account",
+                "path": "vault.total_reports",
+                "account": "BugBountyVault"
+              }
+            ]
+          }
+        },
+        {
+          "name": "system_program",
+          "address": "11111111111111111111111111111111"
+        }
+      ],
+      "args": [
+        {
+          "name": "severity",
+          "type": {
+            "defined": {
+              "name": "SeverityTier"
+            }
+          }
+        },
+        {
+          "name": "ipfs_hash",
+          "type": {
+            "array": [
+              "u8",
+              32
+            ]
+          }
+        }
+      ]
+    },
+    {
+      "name": "toggle_vault_status",
+      "docs": [
+        "Pause/unpause the vault (only program team)"
+      ],
+      "discriminator": [
+        123,
+        122,
+        192,
+        94,
+        4,
+        135,
+        123,
+        14
+      ],
+      "accounts": [
+        {
+          "name": "program_team",
+          "signer": true
+        },
+        {
+          "name": "vault",
+          "writable": true
+        }
+      ],
+      "args": []
+    },
+    {
+      "name": "update_reward_tiers",
+      "docs": [
+        "Update reward tiers (only program team)"
+      ],
+      "discriminator": [
+        219,
+        197,
+        116,
+        224,
+        101,
+        78,
+        190,
+        53
+      ],
+      "accounts": [
+        {
+          "name": "program_team",
+          "signer": true
+        },
+        {
+          "name": "vault",
+          "writable": true
+        }
+      ],
+      "args": [
+        {
+          "name": "critical_reward",
+          "type": "u64"
+        },
+        {
+          "name": "high_reward",
+          "type": "u64"
+        },
+        {
+          "name": "medium_reward",
+          "type": "u64"
+        },
+        {
+          "name": "low_reward",
+          "type": "u64"
+        }
+      ]
+    }
+  ],
+  "accounts": [
+    {
+      "name": "BugBountyVault",
+      "discriminator": [
+        54,
+        210,
+        114,
+        174,
+        255,
+        249,
+        54,
+        230
+      ]
+    },
+    {
+      "name": "ReputationNFT",
+      "discriminator": [
+        173,
+        148,
+        50,
+        211,
+        218,
+        170,
+        186,
+        15
+      ]
+    },
+    {
+      "name": "VulnerabilityReport",
+      "discriminator": [
+        219,
+        119,
+        63,
+        125,
+        101,
+        147,
+        0,
+        122
+      ]
+    }
+  ],
+  "errors": [
+    {
+      "code": 6000,
+      "name": "VaultInactive",
+      "msg": "Vault is inactive"
+    },
+    {
+      "code": 6001,
+      "name": "NotGovernanceAuthority",
+      "msg": "Not authorized as governance authority"
+    },
+    {
+      "code": 6002,
+      "name": "InvalidReportStatus",
+      "msg": "Invalid report status for this operation"
+    },
+    {
+      "code": 6003,
+      "name": "ReportNotApproved",
+      "msg": "Report must be approved before payout"
+    },
+    {
+      "code": 6004,
+      "name": "ReportNotPaid",
+      "msg": "Report must be paid before NFT minting"
+    },
+    {
+      "code": 6005,
+      "name": "UnauthorizedResearcher",
+      "msg": "Unauthorized researcher"
+    },
+    {
+      "code": 6006,
+      "name": "UnauthorizedTeam",
+      "msg": "Only program team can perform this action"
+    },
+    {
+      "code": 6007,
+      "name": "ArithmeticOverflow",
+      "msg": "Arithmetic overflow"
+    }
+  ],
+  "types": [
+    {
+      "name": "BugBountyVault",
+      "type": {
+        "kind": "struct",
+        "fields": [
+          {
+            "name": "program_team",
+            "type": "pubkey"
+          },
+          {
+            "name": "governance_authority",
+            "type": "pubkey"
+          },
+          {
+            "name": "vault_bump",
+            "type": "u8"
+          },
+          {
+            "name": "vault_token_account",
+            "type": "pubkey"
+          },
+          {
+            "name": "critical_reward",
+            "type": "u64"
+          },
+          {
+            "name": "high_reward",
+            "type": "u64"
+          },
+          {
+            "name": "medium_reward",
+            "type": "u64"
+          },
+          {
+            "name": "low_reward",
+            "type": "u64"
+          },
+          {
+            "name": "total_funded",
+            "type": "u64"
+          },
+          {
+            "name": "total_paid_out",
+            "type": "u64"
+          },
+          {
+            "name": "total_reports",
+            "type": "u64"
+          },
+          {
+            "name": "approved_reports",
+            "type": "u64"
+          },
+          {
+            "name": "reward_token_mint",
+            "type": {
+              "option": "pubkey"
+            }
+          },
+          {
+            "name": "vault_active",
+            "type": "bool"
+          },
+          {
+            "name": "created_at",
+            "type": "i64"
+          }
+        ]
+      }
+    },
+    {
+      "name": "ReportStatus",
+      "type": {
+        "kind": "enum",
+        "variants": [
+          {
+            "name": "Pending"
+          },
+          {
+            "name": "Approved"
+          },
+          {
+            "name": "Rejected"
+          },
+          {
+            "name": "Paid"
+          }
+        ]
+      }
+    },
+    {
+      "name": "ReputationNFT",
+      "type": {
+        "kind": "struct",
+        "fields": [
+          {
+            "name": "researcher",
+            "type": "pubkey"
+          },
+          {
+            "name": "vault",
+            "type": "pubkey"
+          },
+          {
+            "name": "report",
+            "type": "pubkey"
+          },
+          {
+            "name": "severity",
+            "type": {
+              "defined": {
+                "name": "SeverityTier"
+              }
+            }
+          },
+          {
+            "name": "project_name",
+            "type": "string"
+          },
+          {
+            "name": "minted_at",
+            "type": "i64"
+          }
+        ]
+      }
+    },
+    {
+      "name": "SeverityTier",
+      "type": {
+        "kind": "enum",
+        "variants": [
+          {
+            "name": "Critical"
+          },
+          {
+            "name": "High"
+          },
+          {
+            "name": "Medium"
+          },
+          {
+            "name": "Low"
+          }
+        ]
+      }
+    },
+    {
+      "name": "VulnerabilityReport",
+      "type": {
+        "kind": "struct",
+        "fields": [
+          {
+            "name": "vault",
+            "type": "pubkey"
+          },
+          {
+            "name": "researcher",
+            "type": "pubkey"
+          },
+          {
+            "name": "severity",
+            "type": {
+              "defined": {
+                "name": "SeverityTier"
+              }
+            }
+          },
+          {
+            "name": "status",
+            "type": {
+              "defined": {
+                "name": "ReportStatus"
+              }
+            }
+          },
+          {
+            "name": "report_ipfs_hash",
+            "type": {
+              "array": [
+                "u8",
+                32
+              ]
+            }
+          },
+          {
+            "name": "report_bump",
+            "type": "u8"
+          },
+          {
+            "name": "submitted_at",
+            "type": "i64"
+          },
+          {
+            "name": "approved_at",
+            "type": {
+              "option": "i64"
+            }
+          },
+          {
+            "name": "paid_at",
+            "type": {
+              "option": "i64"
+            }
+          },
+          {
+            "name": "approver",
+            "type": {
+              "option": "pubkey"
+            }
+          },
+          {
+            "name": "approval_reason",
+            "type": {
+              "option": "string"
+            }
+          },
+          {
+            "name": "payout_amount",
+            "type": "u64"
+          }
+        ]
+      }
+    }
+  ]
+}
