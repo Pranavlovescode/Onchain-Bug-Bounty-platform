@@ -13,7 +13,7 @@ bug_bounty_platform = "7CjDDSGfTDYAydZ3nSamXbahqsaapDY862PQQaVJwiw2"
 url = "https://api.apr.dev"
 
 [provider]
-cluster = "devnet"
+cluster = "localnet"
 wallet = "/home/deilsy/pUfk7BT6joQUgqQQGfEd9Pq7NyxPd24bzBniKDeWhsx.json"
 
 [scripts]

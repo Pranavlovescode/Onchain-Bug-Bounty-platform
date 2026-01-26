@@ -124,7 +124,7 @@ pub mod bug_bounty_platform {
         vault.vault_active = true;
         vault.created_at = Clock::get()?.unix_timestamp;
         
-        msg!("✅ Bug Bounty Vault created with {} critical, {} high rewards", critical_reward, high_reward);
+        msg!("✅ Bug Bounty Vault created with {} critical, {} high, {} medium, {} low rewards", critical_reward, high_reward, medium_reward, low_reward);
         Ok(())
     }
 
@@ -342,6 +342,75 @@ pub mod bug_bounty_platform {
         msg!("⚙️ Reward tiers updated");
         Ok(())
     }
+
+
+    /// Delete vault and return remaining funds to program team
+    /// Only the program team can delete the vault
+    /// Vault must be inactive and have no pending reports
+    pub fn delete_vault(
+        ctx: Context<DeleteVault>,
+        force_delete: bool,
+    ) -> Result<()> {
+        let vault = &ctx.accounts.vault;
+        
+        // Verify caller is the program team
+        require_eq!(
+            ctx.accounts.program_team.key(),
+            vault.program_team,
+            BugBountyError::UnauthorizedTeam
+        );
+        
+        // Vault must be inactive before deletion
+        require!(!vault.vault_active, BugBountyError::VaultMustBeInactive);
+        
+        // Check if there are any pending reports that haven't been resolved
+        let pending_reports = vault.total_reports
+            .checked_sub(vault.approved_reports)
+            .ok_or(BugBountyError::ArithmeticOverflow)?;
+        
+        // Allow deletion only if all reports have been processed
+        // Or the team accepts responsibility for unprocessed reports
+        require!(
+            pending_reports == 0 || force_delete,
+            BugBountyError::HasPendingReports
+        );
+        
+        // Transfer remaining tokens from vault token account to program team
+        let remaining_balance = vault.total_funded
+            .checked_sub(vault.total_paid_out)
+            .ok_or(BugBountyError::ArithmeticOverflow)?;
+        
+        if remaining_balance > 0 {
+            let bump_bytes = [vault.vault_bump];
+            let program_team_key = vault.program_team;
+            
+            let signer_seeds: &[&[&[u8]]] = &[
+                &[
+                    VAULT_SEED.as_bytes(),
+                    program_team_key.as_ref(),
+                    &bump_bytes,
+                ]
+            ];
+            
+            let cpi_ctx = CpiContext::new_with_signer(
+                ctx.accounts.token_program.to_account_info(),
+                Transfer {
+                    from: ctx.accounts.vault_token_account.to_account_info(),
+                    to: ctx.accounts.program_team_token_account.to_account_info(),
+                    authority: ctx.accounts.vault.to_account_info(),
+                },
+                signer_seeds,
+            );
+            
+            token::transfer(cpi_ctx, remaining_balance)?;
+        }
+        
+        msg!("🗑️ Vault deleted. {} tokens returned to program team", remaining_balance);
+        
+        // The vault account will be closed automatically due to the `close` constraint
+        // in the DeleteVault accounts struct
+        Ok(())
+    }
 }
 
 // ============================================================================
@@ -491,6 +560,33 @@ pub struct UpdateRewardTiers<'info> {
     pub vault: Account<'info, BugBountyVault>,
 }
 
+#[derive(Accounts)]
+#[instruction(force_delete: bool)]
+pub struct DeleteVault<'info> {
+    #[account(mut)]
+    pub program_team: Signer<'info>,
+    
+    #[account(
+        mut,
+        close = program_team,
+        constraint = vault.program_team == program_team.key() @ BugBountyError::UnauthorizedTeam,
+        seeds = [VAULT_SEED.as_bytes(), program_team.key().as_ref()],
+        bump = vault.vault_bump
+    )]
+    pub vault: Account<'info, BugBountyVault>,
+    
+    /// CHECK: Vault token account - tokens will be transferred out
+    #[account(mut)]
+    pub vault_token_account: UncheckedAccount<'info>,
+    
+    /// CHECK: Program team's token account to receive remaining funds
+    #[account(mut)]
+    pub program_team_token_account: UncheckedAccount<'info>,
+    
+    pub token_program: Program<'info, Token>,
+    pub system_program: Program<'info, System>,
+}
+
 // ============================================================================
 // ERROR HANDLING
 // ============================================================================
@@ -520,4 +616,10 @@ pub enum BugBountyError {
     
     #[msg("Arithmetic overflow")]
     ArithmeticOverflow,
+    
+    #[msg("Vault must be inactive before deletion")]
+    VaultMustBeInactive,
+    
+    #[msg("Cannot delete vault with pending reports. Use force_delete to override")]
+    HasPendingReports,
 }

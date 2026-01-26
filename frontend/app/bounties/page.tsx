@@ -86,7 +86,7 @@ export default function BountiesDashboard() {
             createdAt: new Date(Number(account.createdAt.toString()) * 1000),
           };
         });
-        
+        console.log("formatted Bounties",formattedBounties);
         setBounties(formattedBounties);
       } catch (err) {
         console.error('Failed to fetch bounties:', err);

@@ -564,4 +564,359 @@ describe("bug-bounty-platform", () => {
       expect(vaultAccount.totalReports.toNumber()).to.be.greaterThan(0);
     });
   });
+
+  describe("Vault Deletion", () => {
+    // Create a separate vault for deletion tests to not affect other tests
+    let deleteTestProgramTeam: anchor.web3.Keypair;
+    let deleteTestVaultPda: anchor.web3.PublicKey;
+    let deleteTestVaultTokenAccount: anchor.web3.PublicKey;
+    let deleteTestProgramTeamTokenAccount: anchor.web3.PublicKey;
+    let isVaultActive = true; // Track vault state
+
+    before(async () => {
+      deleteTestProgramTeam = anchor.web3.Keypair.generate();
+
+      // Airdrop SOL
+      const signature = await connection.requestAirdrop(
+        deleteTestProgramTeam.publicKey,
+        10 * anchor.web3.LAMPORTS_PER_SOL
+      );
+      await connection.confirmTransaction(signature);
+
+      // Calculate vault PDA for this test
+      [deleteTestVaultPda] = anchor.web3.PublicKey.findProgramAddressSync(
+        [Buffer.from(VAULT_SEED), deleteTestProgramTeam.publicKey.toBuffer()],
+        program.programId
+      );
+
+      // Mock token accounts (these would be real SPL token accounts in production)
+      deleteTestVaultTokenAccount = anchor.web3.Keypair.generate().publicKey;
+      deleteTestProgramTeamTokenAccount = anchor.web3.Keypair.generate().publicKey;
+
+      // Create a test vault for deletion with 0 initial funding to avoid token transfer issues
+      await program.methods
+        .createBountyVault(
+          new anchor.BN(1000),
+          new anchor.BN(500),
+          new anchor.BN(250),
+          new anchor.BN(100),
+          new anchor.BN(0), // Zero funding so no token transfer on delete
+          null
+        )
+        .accounts({
+          programTeam: deleteTestProgramTeam.publicKey,
+          governanceAuthority: governanceAuthority.publicKey,
+          vault: deleteTestVaultPda,
+          vaultTokenAccount: deleteTestVaultTokenAccount,
+          systemProgram: anchor.web3.SystemProgram.programId,
+          tokenProgram: TOKEN_PROGRAM_ID,
+        })
+        .signers([deleteTestProgramTeam])
+        .rpc();
+
+      console.log("✅ Test vault created for deletion tests");
+    });
+
+    it("Should fail to delete vault when it is still active", async () => {
+      try {
+        await program.methods
+          .deleteVault(false)
+          .accounts({
+            programTeam: deleteTestProgramTeam.publicKey,
+            vault: deleteTestVaultPda,
+            vaultTokenAccount: deleteTestVaultTokenAccount,
+            programTeamTokenAccount: deleteTestProgramTeamTokenAccount,
+            tokenProgram: TOKEN_PROGRAM_ID,
+            systemProgram: anchor.web3.SystemProgram.programId,
+          })
+          .signers([deleteTestProgramTeam])
+          .rpc();
+        expect.fail("Should have thrown error for active vault deletion");
+      } catch (error) {
+        console.log("✅ Correctly rejected deletion of active vault");
+        expect(error.message).to.include("Vault must be inactive");
+      }
+    });
+
+    it("Should fail to delete vault by unauthorized user", async () => {
+      // Create a completely new vault for this test to avoid state issues
+      const unauthorizedTestTeam = anchor.web3.Keypair.generate();
+      const sig1 = await connection.requestAirdrop(
+        unauthorizedTestTeam.publicKey,
+        10 * anchor.web3.LAMPORTS_PER_SOL
+      );
+      await connection.confirmTransaction(sig1);
+
+      const [unauthorizedTestVaultPda] = anchor.web3.PublicKey.findProgramAddressSync(
+        [Buffer.from(VAULT_SEED), unauthorizedTestTeam.publicKey.toBuffer()],
+        program.programId
+      );
+
+      const unauthorizedTestVaultTokenAccount = anchor.web3.Keypair.generate().publicKey;
+      const unauthorizedTestProgramTeamTokenAccount = anchor.web3.Keypair.generate().publicKey;
+
+      // Create the vault
+      await program.methods
+        .createBountyVault(
+          new anchor.BN(1000),
+          new anchor.BN(500),
+          new anchor.BN(250),
+          new anchor.BN(100),
+          new anchor.BN(0),
+          null
+        )
+        .accounts({
+          programTeam: unauthorizedTestTeam.publicKey,
+          governanceAuthority: governanceAuthority.publicKey,
+          vault: unauthorizedTestVaultPda,
+          vaultTokenAccount: unauthorizedTestVaultTokenAccount,
+          systemProgram: anchor.web3.SystemProgram.programId,
+          tokenProgram: TOKEN_PROGRAM_ID,
+        })
+        .signers([unauthorizedTestTeam])
+        .rpc();
+
+      // Deactivate the vault
+      await program.methods
+        .toggleVaultStatus()
+        .accounts({
+          programTeam: unauthorizedTestTeam.publicKey,
+          vault: unauthorizedTestVaultPda,
+        })
+        .signers([unauthorizedTestTeam])
+        .rpc();
+
+      // Try to delete with a different unauthorized user
+      const unauthorized = anchor.web3.Keypair.generate();
+      const sig2 = await connection.requestAirdrop(
+        unauthorized.publicKey,
+        5 * anchor.web3.LAMPORTS_PER_SOL
+      );
+      await connection.confirmTransaction(sig2);
+
+      try {
+        await program.methods
+          .deleteVault(false)
+          .accounts({
+            programTeam: unauthorized.publicKey,
+            vault: unauthorizedTestVaultPda,
+            vaultTokenAccount: unauthorizedTestVaultTokenAccount,
+            programTeamTokenAccount: unauthorizedTestProgramTeamTokenAccount,
+            tokenProgram: TOKEN_PROGRAM_ID,
+            systemProgram: anchor.web3.SystemProgram.programId,
+          })
+          .signers([unauthorized])
+          .rpc();
+        expect.fail("Should have thrown error for unauthorized deletion");
+      } catch (error) {
+        console.log("✅ Correctly rejected deletion by unauthorized user");
+        // The error could be a constraint error or seeds mismatch
+        expect(error.message).to.satisfy((msg: string) =>
+          msg.includes("Unauthorized") ||
+          msg.includes("ConstraintSeeds") ||
+          msg.includes("AnchorError")
+        );
+      }
+    });
+
+    it("Should successfully delete an inactive vault with no pending reports", async () => {
+      // Create a fresh vault for this specific test
+      const freshDeleteTeam = anchor.web3.Keypair.generate();
+      const sig = await connection.requestAirdrop(
+        freshDeleteTeam.publicKey,
+        10 * anchor.web3.LAMPORTS_PER_SOL
+      );
+      await connection.confirmTransaction(sig);
+
+      const [freshVaultPda] = anchor.web3.PublicKey.findProgramAddressSync(
+        [Buffer.from(VAULT_SEED), freshDeleteTeam.publicKey.toBuffer()],
+        program.programId
+      );
+
+      const freshVaultTokenAccount = anchor.web3.Keypair.generate().publicKey;
+      const freshTeamTokenAccount = anchor.web3.Keypair.generate().publicKey;
+
+      // Create vault with 0 funding
+      await program.methods
+        .createBountyVault(
+          new anchor.BN(1000),
+          new anchor.BN(500),
+          new anchor.BN(250),
+          new anchor.BN(100),
+          new anchor.BN(0),
+          null
+        )
+        .accounts({
+          programTeam: freshDeleteTeam.publicKey,
+          governanceAuthority: governanceAuthority.publicKey,
+          vault: freshVaultPda,
+          vaultTokenAccount: freshVaultTokenAccount,
+          systemProgram: anchor.web3.SystemProgram.programId,
+          tokenProgram: TOKEN_PROGRAM_ID,
+        })
+        .signers([freshDeleteTeam])
+        .rpc();
+
+      // Deactivate the vault
+      await program.methods
+        .toggleVaultStatus()
+        .accounts({
+          programTeam: freshDeleteTeam.publicKey,
+          vault: freshVaultPda,
+        })
+        .signers([freshDeleteTeam])
+        .rpc();
+
+      // Verify vault is inactive
+      let vaultAccount = await program.account.bugBountyVault.fetch(freshVaultPda);
+      expect(vaultAccount.vaultActive).to.be.false;
+
+      const tx = await program.methods
+        .deleteVault(false)
+        .accounts({
+          programTeam: freshDeleteTeam.publicKey,
+          vault: freshVaultPda,
+          vaultTokenAccount: freshVaultTokenAccount,
+          programTeamTokenAccount: freshTeamTokenAccount,
+          tokenProgram: TOKEN_PROGRAM_ID,
+          systemProgram: anchor.web3.SystemProgram.programId,
+        })
+        .signers([freshDeleteTeam])
+        .rpc();
+
+      console.log("✅ Vault deleted successfully with signature:", tx);
+
+      // Verify vault no longer exists
+      try {
+        await program.account.bugBountyVault.fetch(freshVaultPda);
+        expect.fail("Vault should not exist after deletion");
+      } catch (error) {
+        console.log("✅ Confirmed vault account was closed");
+        expect(error.message).to.include("Account does not exist");
+      }
+    });
+
+    it("Should delete vault with force_delete flag when there are pending reports", async () => {
+      // Create a new vault for this test
+      const forceDeleteTeam = anchor.web3.Keypair.generate();
+      const sig = await connection.requestAirdrop(
+        forceDeleteTeam.publicKey,
+        10 * anchor.web3.LAMPORTS_PER_SOL
+      );
+      await connection.confirmTransaction(sig);
+
+      const [forceDeleteVaultPda] = anchor.web3.PublicKey.findProgramAddressSync(
+        [Buffer.from(VAULT_SEED), forceDeleteTeam.publicKey.toBuffer()],
+        program.programId
+      );
+
+      const forceDeleteVaultTokenAccount = anchor.web3.Keypair.generate().publicKey;
+      const forceDeleteTeamTokenAccount = anchor.web3.Keypair.generate().publicKey;
+
+      // Create vault with 0 funding to avoid token transfer issues
+      await program.methods
+        .createBountyVault(
+          new anchor.BN(1000),
+          new anchor.BN(500),
+          new anchor.BN(250),
+          new anchor.BN(100),
+          new anchor.BN(0), // Zero funding
+          null
+        )
+        .accounts({
+          programTeam: forceDeleteTeam.publicKey,
+          governanceAuthority: governanceAuthority.publicKey,
+          vault: forceDeleteVaultPda,
+          vaultTokenAccount: forceDeleteVaultTokenAccount,
+          systemProgram: anchor.web3.SystemProgram.programId,
+          tokenProgram: TOKEN_PROGRAM_ID,
+        })
+        .signers([forceDeleteTeam])
+        .rpc();
+
+      // Submit a report to create pending state
+      const testResearcher = anchor.web3.Keypair.generate();
+      const researcherSig = await connection.requestAirdrop(
+        testResearcher.publicKey,
+        5 * anchor.web3.LAMPORTS_PER_SOL
+      );
+      await connection.confirmTransaction(researcherSig);
+
+      const [testReportPda] = anchor.web3.PublicKey.findProgramAddressSync(
+        [
+          Buffer.from(REPORT_SEED),
+          forceDeleteVaultPda.toBuffer(),
+          testResearcher.publicKey.toBuffer(),
+          new anchor.BN(0).toBuffer("le", 8),
+        ],
+        program.programId
+      );
+
+      await program.methods
+        .submitReport({ low: {} }, Buffer.alloc(32, "testreport"))
+        .accounts({
+          researcher: testResearcher.publicKey,
+          vault: forceDeleteVaultPda,
+          report: testReportPda,
+          systemProgram: anchor.web3.SystemProgram.programId,
+        })
+        .signers([testResearcher])
+        .rpc();
+
+      // Deactivate vault
+      await program.methods
+        .toggleVaultStatus()
+        .accounts({
+          programTeam: forceDeleteTeam.publicKey,
+          vault: forceDeleteVaultPda,
+        })
+        .signers([forceDeleteTeam])
+        .rpc();
+
+      // Try to delete without force flag - should fail
+      try {
+        await program.methods
+          .deleteVault(false)
+          .accounts({
+            programTeam: forceDeleteTeam.publicKey,
+            vault: forceDeleteVaultPda,
+            vaultTokenAccount: forceDeleteVaultTokenAccount,
+            programTeamTokenAccount: forceDeleteTeamTokenAccount,
+            tokenProgram: TOKEN_PROGRAM_ID,
+            systemProgram: anchor.web3.SystemProgram.programId,
+          })
+          .signers([forceDeleteTeam])
+          .rpc();
+        expect.fail("Should have thrown error for pending reports");
+      } catch (error) {
+        console.log("✅ Correctly rejected deletion with pending reports");
+        expect(error.message).to.include("pending reports");
+      }
+
+      // Delete with force flag - should succeed
+      const tx = await program.methods
+        .deleteVault(true)
+        .accounts({
+          programTeam: forceDeleteTeam.publicKey,
+          vault: forceDeleteVaultPda,
+          vaultTokenAccount: forceDeleteVaultTokenAccount,
+          programTeamTokenAccount: forceDeleteTeamTokenAccount,
+          tokenProgram: TOKEN_PROGRAM_ID,
+          systemProgram: anchor.web3.SystemProgram.programId,
+        })
+        .signers([forceDeleteTeam])
+        .rpc();
+
+      console.log("✅ Vault force-deleted with signature:", tx);
+
+      // Verify vault no longer exists
+      try {
+        await program.account.bugBountyVault.fetch(forceDeleteVaultPda);
+        expect.fail("Vault should not exist after force deletion");
+      } catch (error) {
+        console.log("✅ Confirmed vault was force-deleted");
+        expect(error.message).to.include("Account does not exist");
+      }
+    });
+  });
 });
