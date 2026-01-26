@@ -73,6 +73,9 @@ interface VulnerabilityReportFormProps {
     title: string;
     severity: 'critical' | 'high' | 'medium' | 'low';
     description: string;
+    stepsToReproduce?: string;
+    impact?: string;
+    suggestedFix?: string;
     file?: File;
   }) => Promise<void>;
   isSubmitting?: boolean;
@@ -87,6 +90,9 @@ export function VulnerabilityReportForm({
     title: '',
     severity: 'high' as 'critical' | 'high' | 'medium' | 'low',
     description: '',
+    stepsToReproduce: '',
+    impact: '',
+    suggestedFix: '',
   });
   const [file, setFile] = useState<File | undefined>();
   const [errors, setErrors] = useState<Record<string, string>>({});
@@ -96,8 +102,12 @@ export function VulnerabilityReportForm({
     if (!formData.title.trim()) newErrors.title = 'Title is required';
     if (formData.title.length > 200) newErrors.title = 'Title must be less than 200 characters';
     if (!formData.description.trim()) newErrors.description = 'Description is required';
-    if (formData.description.length < 100)
-      newErrors.description = 'Description must be at least 100 characters';
+    if (formData.description.length < 50)
+      newErrors.description = 'Description must be at least 50 characters';
+    if (!formData.stepsToReproduce.trim()) 
+      newErrors.stepsToReproduce = 'Steps to reproduce are required';
+    if (!formData.impact.trim()) 
+      newErrors.impact = 'Impact assessment is required';
 
     setErrors(newErrors);
     return Object.keys(newErrors).length === 0;
@@ -139,7 +149,7 @@ export function VulnerabilityReportForm({
               onClick={() => setFormData({ ...formData, severity: level })}
               className={`p-3 rounded-lg border-2 transition-all ${
                 formData.severity === level
-                  ? 'border-blue-500 bg-blue-900 bg-opacity-20'
+                  ? 'border-blue-500 bg-blue-900/20'
                   : 'border-gray-700 hover:border-gray-600 bg-gray-800'
               }`}
             >
@@ -150,33 +160,64 @@ export function VulnerabilityReportForm({
       </div>
 
       <Textarea
-        label="Detailed Description"
-        placeholder="Provide a comprehensive description of the vulnerability, including:
-- Steps to reproduce
-- Impact assessment
-- Proof of concept
-- Recommended fix"
+        label="Vulnerability Description"
+        placeholder="Provide a clear and concise description of the vulnerability..."
         value={formData.description}
         onChange={(e) => setFormData({ ...formData, description: e.target.value })}
         error={errors.description}
-        rows={10}
+        rows={5}
+      />
+
+      <Textarea
+        label="Steps to Reproduce"
+        placeholder="1. Navigate to...
+2. Call function X with parameters...
+3. Observe that..."
+        value={formData.stepsToReproduce}
+        onChange={(e) => setFormData({ ...formData, stepsToReproduce: e.target.value })}
+        error={errors.stepsToReproduce}
+        rows={6}
+      />
+
+      <Textarea
+        label="Impact Assessment"
+        placeholder="Describe the potential impact of this vulnerability. What could an attacker achieve? What's the worst-case scenario?"
+        value={formData.impact}
+        onChange={(e) => setFormData({ ...formData, impact: e.target.value })}
+        error={errors.impact}
+        rows={4}
+      />
+
+      <Textarea
+        label="Suggested Fix (Optional)"
+        placeholder="If you have recommendations for fixing this vulnerability, include them here..."
+        value={formData.suggestedFix}
+        onChange={(e) => setFormData({ ...formData, suggestedFix: e.target.value })}
+        rows={4}
       />
 
       <div>
-        <label className="block text-sm font-medium text-gray-200 mb-2">Attach Report (Optional)</label>
+        <label className="block text-sm font-medium text-gray-200 mb-2">
+          Attach Proof of Concept (Optional)
+        </label>
         <div className="border-2 border-dashed border-gray-700 rounded-lg p-6 text-center hover:border-blue-500 transition-colors cursor-pointer">
           <input
             type="file"
-            accept=".pdf,.md,.txt"
+            accept=".pdf,.md,.txt,.py,.js,.ts,.sol,.rs"
             onChange={(e) => setFile(e.target.files?.[0])}
             className="hidden"
             id="file-input"
           />
           <label htmlFor="file-input" className="cursor-pointer">
             <div className="text-2xl mb-2">📄</div>
-            <p className="text-gray-200 font-medium">Upload detailed report</p>
-            <p className="text-gray-400 text-xs mt-1">PDF, Markdown, or Text file</p>
-            {file && <p className="text-blue-400 text-sm mt-2">✓ {file.name}</p>}
+            <p className="text-gray-200 font-medium">Upload proof of concept or detailed report</p>
+            <p className="text-gray-400 text-xs mt-1">PDF, Markdown, Text, or Code files (max 10MB)</p>
+            {file && (
+              <div className="mt-3 bg-blue-900/30 rounded-lg p-2">
+                <p className="text-blue-400 text-sm">✓ {file.name}</p>
+                <p className="text-gray-400 text-xs">{(file.size / 1024).toFixed(1)} KB</p>
+              </div>
+            )}
           </label>
         </div>
       </div>

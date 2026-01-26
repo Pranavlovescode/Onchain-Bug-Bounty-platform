@@ -11,12 +11,16 @@
   "dependencies": {
     "@coral-xyz/anchor": "^0.32.1",
     "@hookform/resolvers": "^3.3.0",
+    "@ipld/car": "^5.4.2",
     "@solana/wallet-adapter-base": "^0.9.0",
     "@solana/wallet-adapter-react": "^0.15.0",
     "@solana/wallet-adapter-react-ui": "^0.9.0",
     "@solana/wallet-adapter-wallets": "^0.19.0",
     "@solana/web3.js": "^1.95.0",
     "@tanstack/react-query": "^5.0.0",
+    "@ucanto/core": "^10.4.6",
+    "@ucanto/principal": "^9.0.3",
+    "@web3-storage/w3up-client": "^17.3.0",
     "axios": "^1.6.0",
     "bs58": "^5.0.0",
     "clsx": "^2.0.0",
@@ -27,7 +31,6 @@
     "react-hook-form": "^7.50.0",
     "react-markdown": "^9.0.0",
     "tailwind-merge": "^2.2.0",
-    "web3.storage": "^4.5.0",
     "zustand": "^4.4.0"
   },
   "devDependencies": {

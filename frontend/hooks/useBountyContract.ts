@@ -239,16 +239,68 @@ export function useBountyContract() {
    * Submit a vulnerability report
    */
   const submitReport = useCallback(
-    async (bountyId: string, ipfsHash: string, severity: string) => {
+    async (vaultPubkey: PublicKey, ipfsHash: string, severity: 'critical' | 'high' | 'medium' | 'low') => {
       if (!publicKey || !program) {
         throw new Error("Wallet not connected");
       }
 
-      const txId = generateId("report_");
-
       try {
-        // TODO: Implement with Anchor
-        throw new Error("Submit report not yet implemented");
+        // Convert severity string to Anchor enum format
+        const severityEnum = {
+          critical: { critical: {} },
+          high: { high: {} },
+          medium: { medium: {} },
+          low: { low: {} },
+        }[severity];
+
+        if (!severityEnum) {
+          throw new Error(`Invalid severity: ${severity}`);
+        }
+
+        // Convert IPFS hash string to fixed-size byte array [u8; 32]
+        const ipfsHashBytes = new Uint8Array(32);
+        const hashBuffer = Buffer.from(ipfsHash);
+        ipfsHashBytes.set(hashBuffer.slice(0, 32));
+
+        // Fetch the vault to get current total_reports for PDA derivation
+        const accountNamespace = program.account as any;
+        const vaultAccount = await accountNamespace.bugBountyVault.fetch(vaultPubkey);
+        const totalReports = vaultAccount.totalReports as BN;
+
+        // Derive the report PDA
+        // Seeds: ["report", vault, researcher, total_reports]
+        const programId = new PublicKey(PROGRAMS.BugBountyPlatform);
+        const [reportPDA] = PublicKey.findProgramAddressSync(
+          [
+            Buffer.from("report"),
+            vaultPubkey.toBuffer(),
+            publicKey.toBuffer(),
+            totalReports.toArrayLike(Buffer, 'le', 8),
+          ],
+          programId,
+        );
+
+        console.log("Submitting vulnerability report...");
+        console.log("Vault:", vaultPubkey.toBase58());
+        console.log("Report PDA:", reportPDA.toBase58());
+        console.log("Researcher:", publicKey.toBase58());
+        console.log("Severity:", severity);
+        console.log("IPFS Hash:", ipfsHash);
+
+        // Submit the report using Anchor
+        const signature = await program.methods
+          .submitReport(severityEnum, Array.from(ipfsHashBytes))
+          .accounts({
+            researcher: publicKey,
+            vault: vaultPubkey,
+            report: reportPDA,
+            systemProgram: SystemProgram.programId,
+          })
+          .rpc();
+
+        console.log("Report submitted successfully! Signature:", signature);
+
+        return { signature, reportPDA };
       } catch (error) {
         console.error("Report submission failed:", error);
         throw error;
@@ -298,6 +350,49 @@ export function useBountyContract() {
     }
   }, [program]);
 
+  /**
+   * Fetch all vulnerability reports from on-chain
+   */
+  const fetchReports = useCallback(async () => {
+    if (!program) {
+      return [];
+    }
+
+    try {
+      const accountNamespace = program.account as any;
+      const reports = await accountNamespace.vulnerabilityReport.all();
+      return reports;
+    } catch (error) {
+      console.error("Failed to fetch reports:", error);
+      throw error;
+    }
+  }, [program]);
+
+  /**
+   * Fetch reports for a specific vault
+   */
+  const fetchReportsForVault = useCallback(async (vaultPubkey: PublicKey) => {
+    if (!program) {
+      return [];
+    }
+
+    try {
+      const accountNamespace = program.account as any;
+      const reports = await accountNamespace.vulnerabilityReport.all([
+        {
+          memcmp: {
+            offset: 8, // After discriminator
+            bytes: vaultPubkey.toBase58(),
+          },
+        },
+      ]);
+      return reports;
+    } catch (error) {
+      console.error("Failed to fetch reports for vault:", error);
+      throw error;
+    }
+  }, [program]);
+
   return {
     connected: !!publicKey,
     publicKey,
@@ -311,5 +406,7 @@ export function useBountyContract() {
     submitReport,
     approveReport,
     fetchBounties,
+    fetchReports,
+    fetchReportsForVault,
   };
 }

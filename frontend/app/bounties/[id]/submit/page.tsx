@@ -1,10 +1,13 @@
 'use client';
 
-import { useState } from 'react';
+import { useState, use } from 'react';
 import Link from 'next/link';
 import { Button, Card } from '@/components/ui';
 import { VulnerabilityReportForm, IPFSUploadProgress, TransactionToast } from '@/components/forms';
-import { uploadJSONToIPFS } from '@/lib/ipfs';
+import { uploadVulnerabilityReport, getIPFSGatewayUrl } from '@/lib/ipfs';
+import { useWallet } from '@solana/wallet-adapter-react';
+import { useBountyContract } from '@/hooks/useBountyContract';
+import { PublicKey } from '@solana/web3.js';
 
 /**
  * Submit Vulnerability Report Page
@@ -13,65 +16,123 @@ import { uploadJSONToIPFS } from '@/lib/ipfs';
 export default function SubmitVulnerabilityPage({
   params,
 }: {
-  params: { id: string };
+  params: Promise<{ id: string }>;
 }) {
+  const resolvedParams = use(params);
+  const { publicKey, connected } = useWallet();
+  const { submitReport, program } = useBountyContract();
   const [isSubmitting, setIsSubmitting] = useState(false);
   const [ipfsProgress, setIpfsProgress] = useState(0);
   const [ipfsStatus, setIpfsStatus] = useState<'idle' | 'uploading' | 'success' | 'error'>('idle');
   const [ipfsHash, setIpfsHash] = useState<string | undefined>();
+  const [ipfsError, setIpfsError] = useState<string | undefined>();
   const [txStatus, setTxStatus] = useState<{
     hash: string;
     status: 'pending' | 'success' | 'failure';
   } | null>(null);
 
-  const bountyId = params.id;
+  const bountyId = resolvedParams.id;
 
   const handleSubmit = async (data: {
     title: string;
     severity: 'critical' | 'high' | 'medium' | 'low';
     description: string;
+    stepsToReproduce?: string;
+    impact?: string;
+    suggestedFix?: string;
     file?: File;
   }) => {
+    if (!connected || !publicKey) {
+      setIpfsError('Please connect your wallet first');
+      return;
+    }
+
+    if (!program) {
+      setIpfsError('Program not initialized. Please try again.');
+      return;
+    }
+
     setIsSubmitting(true);
+    setIpfsError(undefined);
+    setTxStatus(null);
 
     try {
-      // Step 1: Upload to IPFS
+      // Step 1: Upload to IPFS via Web3.Storage
       setIpfsStatus('uploading');
+      setIpfsProgress(0);
 
       const reportData = {
         title: data.title,
         severity: data.severity,
         description: data.description,
-        submittedAt: new Date().toISOString(),
+        stepsToReproduce: data.stepsToReproduce || '',
+        impact: data.impact || '',
+        suggestedFix: data.suggestedFix,
+        submitterAddress: publicKey.toBase58(),
         bountyId,
+        timestamp: Date.now(),
       };
 
-      const hash = await uploadJSONToIPFS(reportData);
-      setIpfsHash(hash);
+      // Upload report with optional attachments
+      const attachments = data.file ? [data.file] : undefined;
+      const cid = await uploadVulnerabilityReport(
+        reportData,
+        attachments,
+        (progress) => setIpfsProgress(progress)
+      );
+      
+      setIpfsHash(cid);
       setIpfsStatus('success');
+      
+      console.log('Report uploaded to IPFS:', cid);
+      console.log('View at:', getIPFSGatewayUrl(cid, 'report.json'));
 
-      // Step 2: Create transaction (mock)
-      // In production, this would call a smart contract function
+      // Step 2: Submit on-chain via Solana program
       setTxStatus({
-        hash: '0x' + Math.random().toString(16).slice(2) + Math.random().toString(16).slice(2),
+        hash: 'submitting...',
         status: 'pending',
       });
 
-      // Simulate transaction confirmation
-      setTimeout(() => {
-        setTxStatus((prev) =>
-          prev ? { ...prev, status: 'success' } : null,
-        );
-      }, 3000);
+      // Parse the bountyId as a PublicKey (vault address)
+      let vaultPubkey: PublicKey;
+      try {
+        vaultPubkey = new PublicKey(bountyId);
+      } catch (e) {
+        throw new Error('Invalid bounty ID: must be a valid Solana address');
+      }
 
-      // Success notification
-      setTimeout(() => {
-        // Reset form
-        setIsSubmitting(false);
-      }, 4000);
+      // Submit the report to the blockchain
+      const { signature, reportPDA } = await submitReport(
+        vaultPubkey,
+        cid,
+        data.severity
+      );
+
+      console.log('Report submitted on-chain! Signature:', signature);
+      console.log('Report PDA:', reportPDA.toBase58());
+
+      setTxStatus({
+        hash: signature,
+        status: 'success',
+      });
+
+      setIsSubmitting(false);
     } catch (error) {
       console.error('Submission error:', error);
-      setIpfsStatus('error');
+      
+      // Handle IPFS vs blockchain errors differently
+      if (ipfsStatus !== 'success') {
+        setIpfsStatus('error');
+        setIpfsError(error instanceof Error ? error.message : 'Upload failed');
+      } else {
+        // IPFS succeeded but blockchain failed
+        setTxStatus({
+          hash: '',
+          status: 'failure',
+        });
+        setIpfsError(error instanceof Error ? error.message : 'Blockchain submission failed');
+      }
+      
       setIsSubmitting(false);
     }
   };
@@ -106,13 +167,27 @@ export default function SubmitVulnerabilityPage({
 
           {/* IPFS Upload Status */}
           {ipfsStatus !== 'idle' && (
-            <Card className="mt-8 bg-blue-900 border-blue-700">
+            <Card className="mt-8 bg-blue-900/50 border-blue-700">
               <h4 className="font-bold text-blue-100 mb-4">Upload Status</h4>
               <IPFSUploadProgress
                 progress={ipfsProgress}
                 status={ipfsStatus}
                 ipfsHash={ipfsHash}
+                error={ipfsError}
               />
+              {ipfsHash && ipfsStatus === 'success' && (
+                <div className="mt-4 pt-4 border-t border-blue-700">
+                  <p className="text-sm text-blue-200 mb-2">Your report has been uploaded to IPFS:</p>
+                  <a
+                    href={getIPFSGatewayUrl(ipfsHash, 'report.json')}
+                    target="_blank"
+                    rel="noopener noreferrer"
+                    className="text-sm text-blue-400 hover:text-blue-300 break-all"
+                  >
+                    View on IPFS →
+                  </a>
+                </div>
+              )}
             </Card>
           )}
 
