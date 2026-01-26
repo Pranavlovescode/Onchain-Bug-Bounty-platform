@@ -7,7 +7,8 @@ import { SeverityBadge, StatusChip } from '@/components/cards';
 import { useBountyContract } from '@/hooks/useBountyContract';
 import { PublicKey, LAMPORTS_PER_SOL } from '@solana/web3.js';
 import { BN } from '@coral-xyz/anchor';
-import { getIPFSGatewayUrl } from '@/lib/ipfs';
+import { getIPFSGatewayUrl, fetchJSONFromIPFS } from '@/lib/ipfs';
+import Link from 'next/link';
 
 interface VulnerabilityReportAccount {
   vault: PublicKey;
@@ -26,30 +27,65 @@ interface VulnerabilityReportAccount {
 
 interface BountyVaultAccount {
   authority: PublicKey;
+  programTeam: PublicKey;
+  governanceAuthority: PublicKey;
   name: string;
   descriptionIpfsHash: number[];
-  balance: BN;
-  minPayout: BN;
-  maxPayout: BN;
+  criticalReward: BN;
+  highReward: BN;
+  mediumReward: BN;
+  lowReward: BN;
+  totalFunded: BN;
+  totalPaidOut: BN;
+  totalReports: BN;
+  approvedReports: BN;
+  vaultActive: boolean;
   createdAt: BN;
-  isActive: boolean;
+}
+
+interface IPFSReportData {
+  title: string;
+  description: string;
+  severity: string;
+  stepsToReproduce?: string;
+  impact?: string;
+  suggestedFix?: string;
+  submitterAddress: string;
+  bountyId: string;
+  timestamp: number;
 }
 
 interface ParsedReport {
   id: string;
   publicKey: PublicKey;
   title: string;
+  description: string;
   severity: 'critical' | 'high' | 'medium' | 'low';
   bountyProject: string;
   bountyId: string;
   vaultPubkey: PublicKey;
   submittedBy: string;
+  researcherFullAddress: string;
   researcherPubkey: PublicKey;
   submittedDate: string;
+  submittedTimestamp: number;
   status: 'submitted' | 'reviewing' | 'approved' | 'rejected' | 'paid';
   ipfsHash: string;
   payoutAmount: number | null;
   approver: string | null;
+  impact?: string;
+  stepsToReproduce?: string;
+  suggestedFix?: string;
+  // Bounty details
+  bountyOwner: string;
+  bountyRewards: {
+    critical: number;
+    high: number;
+    medium: number;
+    low: number;
+  };
+  bountyTotalFunded: number;
+  bountyIsActive: boolean;
 }
 
 // Helper to convert byte array to IPFS CID string
@@ -57,6 +93,20 @@ const bytesToIpfsHash = (bytes: number[]): string => {
   const nonZeroBytes = bytes.filter((b) => b !== 0);
   if (nonZeroBytes.length === 0) return '';
   return String.fromCharCode(...nonZeroBytes);
+};
+
+// Try to resolve full CID from registry (for truncated hashes)
+const resolveFullCid = async (shortHash: string): Promise<string> => {
+  try {
+    const response = await fetch(`/api/ipfs/registry?shortHash=${encodeURIComponent(shortHash)}`);
+    if (response.ok) {
+      const data = await response.json();
+      return data.fullCid || shortHash;
+    }
+  } catch (e) {
+    console.warn('Failed to resolve full CID:', e);
+  }
+  return shortHash;
 };
 
 const getSeverityFromEnum = (severity: { critical?: {}; high?: {}; medium?: {}; low?: {} }): 'critical' | 'high' | 'medium' | 'low' => {
@@ -79,8 +129,29 @@ const formatDate = (timestamp: BN): string => {
   return date.toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric' });
 };
 
+const formatDateTime = (timestamp: BN): string => {
+  const date = new Date(timestamp.toNumber() * 1000);
+  return date.toLocaleString('en-US', { 
+    month: 'short', 
+    day: 'numeric', 
+    year: 'numeric',
+    hour: '2-digit',
+    minute: '2-digit'
+  });
+};
+
 const shortenAddress = (address: string): string => {
   return `${address.slice(0, 4)}...${address.slice(-4)}`;
+};
+
+const getExpectedReward = (severity: string, rewards: { critical: number; high: number; medium: number; low: number }): number => {
+  switch (severity) {
+    case 'critical': return rewards.critical;
+    case 'high': return rewards.high;
+    case 'medium': return rewards.medium;
+    case 'low': return rewards.low;
+    default: return 0;
+  }
 };
 
 /**
@@ -121,37 +192,85 @@ export default function GovernancePanel() {
       // Fetch all vulnerability reports
       const reportData = await fetchReports();
 
-      console.log("reports from blockchain", reportData)
+      console.log("reports from blockchain", reportData);
       
-      // Parse reports into UI format
+      // Parse reports into UI format (don't wait for IPFS data initially)
       const parsedReports: ParsedReport[] = reportData.map((r: { publicKey: PublicKey; account: VulnerabilityReportAccount }, index: number) => {
         const vault = vaultMap.get(r.account.vault.toBase58());
         const ipfsHash = bytesToIpfsHash(r.account.reportIpfsHash);
+        const researcherAddress = r.account.researcher.toBase58();
         
         return {
           id: r.publicKey.toBase58(),
           publicKey: r.publicKey,
-          title: `Report #${index + 1}`, // Title from IPFS if needed
+          title: `Vulnerability Report #${index + 1}`,
+          description: '',
           severity: getSeverityFromEnum(r.account.severity),
           bountyProject: vault?.name || 'Unknown Bounty',
           bountyId: r.account.vault.toBase58(),
           vaultPubkey: r.account.vault,
-          submittedBy: shortenAddress(r.account.researcher.toBase58()),
+          submittedBy: shortenAddress(researcherAddress),
+          researcherFullAddress: researcherAddress,
           researcherPubkey: r.account.researcher,
           submittedDate: formatDate(r.account.submittedAt),
+          submittedTimestamp: r.account.submittedAt.toNumber(),
           status: getStatusFromEnum(r.account.status),
           ipfsHash,
           payoutAmount: r.account.payoutAmount ? r.account.payoutAmount.toNumber() / LAMPORTS_PER_SOL : null,
           approver: r.account.approver ? shortenAddress(r.account.approver.toBase58()) : null,
+          impact: undefined,
+          stepsToReproduce: undefined,
+          suggestedFix: undefined,
+          // Bounty details
+          bountyOwner: vault?.programTeam ? shortenAddress(vault.programTeam.toBase58()) : 'Unknown',
+          bountyRewards: {
+            critical: vault?.criticalReward ? vault.criticalReward.toNumber() / LAMPORTS_PER_SOL : 0,
+            high: vault?.highReward ? vault.highReward.toNumber() / LAMPORTS_PER_SOL : 0,
+            medium: vault?.mediumReward ? vault.mediumReward.toNumber() / LAMPORTS_PER_SOL : 0,
+            low: vault?.lowReward ? vault.lowReward.toNumber() / LAMPORTS_PER_SOL : 0,
+          },
+          bountyTotalFunded: vault?.totalFunded ? vault.totalFunded.toNumber() / LAMPORTS_PER_SOL : 0,
+          bountyIsActive: vault?.vaultActive ?? false,
         };
       });
       
       // Sort by submission date (newest first)
-      parsedReports.sort((a, b) => {
-        return new Date(b.submittedDate).getTime() - new Date(a.submittedDate).getTime();
-      });
+      parsedReports.sort((a, b) => b.submittedTimestamp - a.submittedTimestamp);
       
       setReports(parsedReports);
+      setLoading(false);
+      
+      // Fetch IPFS data in background for each report
+      for (const report of parsedReports) {
+        if (report.ipfsHash) {
+          // Try to resolve full CID first (on-chain stores truncated version)
+          resolveFullCid(report.ipfsHash)
+            .then((fullCid) => {
+              console.log(`Resolved CID: ${report.ipfsHash} -> ${fullCid}`);
+              return fetchJSONFromIPFS(fullCid, 'report.json');
+            })
+            .then((jsonData) => {
+              const ipfsData = jsonData as unknown as IPFSReportData;
+              setReports((prevReports) =>
+                prevReports.map((r) =>
+                  r.id === report.id
+                    ? {
+                        ...r,
+                        title: ipfsData.title || r.title,
+                        description: ipfsData.description || '',
+                        impact: ipfsData.impact,
+                        stepsToReproduce: ipfsData.stepsToReproduce,
+                        suggestedFix: ipfsData.suggestedFix,
+                      }
+                    : r
+                )
+              );
+            })
+            .catch((err) => {
+              console.warn(`Could not fetch IPFS data for report ${report.id}:`, err.message);
+            });
+        }
+      }
     } catch (err) {
       console.error('Failed to load governance data:', err);
       setError('Failed to load reports from blockchain');
@@ -307,78 +426,211 @@ export default function GovernancePanel() {
           {filteredReports.map((report) => (
             <Card key={report.id} className="hover:border-blue-500 transition-colors">
               {/* Header */}
-              <div className="flex items-start justify-between mb-6">
+              <div className="flex items-start justify-between mb-4">
                 <div className="flex-1">
                   <div className="flex items-center gap-3 mb-2">
                     <h3 className="text-xl font-bold text-gray-100">{report.title}</h3>
                     <SeverityBadge severity={report.severity} size="sm" />
                   </div>
                   <p className="text-gray-400 text-sm">
-                    {report.bountyProject} • {report.submittedDate}
+                    Submitted on {report.submittedDate}
                   </p>
                 </div>
                 <StatusChip status={report.status} />
               </div>
 
+              {/* Description Preview */}
+              <div className="mb-4 p-3 bg-gray-800/50 rounded-lg">
+                {report.description ? (
+                  <p className="text-gray-300 text-sm line-clamp-3">{report.description}</p>
+                ) : report.ipfsHash ? (
+                  <p className="text-gray-500 text-sm italic">Loading description from IPFS...</p>
+                ) : (
+                  <p className="text-gray-500 text-sm">No description available</p>
+                )}
+              </div>
+
+              {/* Bounty Information */}
+              {/* <div className="mb-4 p-4 bg-blue-900/20 border border-blue-800 rounded-lg">
+                <div className="flex items-center gap-2 mb-3">
+                  <span className="text-blue-400 text-lg">🎯</span>
+                  <h4 className="font-semibold text-blue-300">Bounty Information</h4>
+                </div>
+                <div className="grid md:grid-cols-4 gap-4">
+                  <div>
+                    <p className="text-xs text-gray-400 mb-1">Bounty Name</p>
+                    <Link 
+                      href={`/bounties/${report.bountyId}`}
+                      className="text-blue-400 hover:text-blue-300 font-medium"
+                    >
+                      {report.bountyProject}
+                    </Link>
+                  </div>
+                  <div>
+                    <p className="text-xs text-gray-400 mb-1">Bounty Owner</p>
+                    <p className="font-mono text-sm text-gray-300">{report.bountyOwner}</p>
+                  </div>
+                  <div>
+                    <p className="text-xs text-gray-400 mb-1">Total Funded</p>
+                    <p className="text-gray-100 font-medium">{report.bountyTotalFunded.toFixed(2)} SOL</p>
+                  </div>
+                  <div>
+                    <p className="text-xs text-gray-400 mb-1">Expected Reward ({report.severity})</p>
+                    <p className="text-green-400 font-bold">
+                      {getExpectedReward(report.severity, report.bountyRewards).toFixed(2)} SOL
+                    </p>
+                  </div>
+                </div>
+              </div> */}
+
+              {/* Researcher Information */}
+              {/* <div className="mb-4 p-4 bg-purple-900/20 border border-purple-800 rounded-lg">
+                <div className="flex items-center gap-2 mb-3">
+                  <span className="text-purple-400 text-lg">👤</span>
+                  <h4 className="font-semibold text-purple-300">Researcher Information</h4>
+                </div>
+                <div className="grid md:grid-cols-3 gap-4">
+                  <div>
+                    <p className="text-xs text-gray-400 mb-1">Wallet Address</p>
+                    <p className="font-mono text-sm text-purple-400" title={report.researcherFullAddress}>
+                      {report.submittedBy}
+                    </p>
+                  </div>
+                  <div>
+                    <p className="text-xs text-gray-400 mb-1">Full Address</p>
+                    <p className="font-mono text-xs text-gray-400 break-all">{report.researcherFullAddress}</p>
+                  </div>
+                  <div>
+                    <p className="text-xs text-gray-400 mb-1">Report Account</p>
+                    <p className="font-mono text-xs text-gray-400">{shortenAddress(report.id)}</p>
+                  </div>
+                </div>
+              </div> */}
+
               {/* Report Details */}
-              <div className="grid md:grid-cols-4 gap-4 mb-6 pb-6 border-b border-gray-700">
+              <div className="grid md:grid-cols-4 gap-4 mb-4 pb-4 border-b border-gray-700">
                 <div>
-                  <p className="text-xs text-gray-400 mb-1">Submitted By</p>
-                  <p className="font-mono text-sm text-blue-400">{report.submittedBy}</p>
+                  <p className="text-xs text-gray-400 mb-1">Severity Level</p>
+                  <p className={`font-bold capitalize ${
+                    report.severity === 'critical' ? 'text-red-400' :
+                    report.severity === 'high' ? 'text-orange-400' :
+                    report.severity === 'medium' ? 'text-yellow-400' : 'text-blue-400'
+                  }`}>
+                    {report.severity}
+                  </p>
                 </div>
                 <div>
-                  <p className="text-xs text-gray-400 mb-1">Report ID</p>
-                  <p className="font-mono text-xs text-gray-300">{shortenAddress(report.id)}</p>
+                  <p className="text-xs text-gray-400 mb-1">Status</p>
+                  <p className={`font-medium capitalize ${
+                    report.status === 'submitted' ? 'text-yellow-400' :
+                    report.status === 'approved' ? 'text-green-400' :
+                    report.status === 'rejected' ? 'text-red-400' :
+                    report.status === 'paid' ? 'text-blue-400' : 'text-gray-400'
+                  }`}>
+                    {report.status === 'submitted' ? 'Pending Review' : report.status}
+                  </p>
                 </div>
                 <div>
                   <p className="text-xs text-gray-400 mb-1">IPFS Report</p>
                   {report.ipfsHash ? (
                     <a
-                      href={getIPFSGatewayUrl(report.ipfsHash)}
+                      href={getIPFSGatewayUrl(report.ipfsHash, 'report.json')}
                       target="_blank"
                       rel="noopener noreferrer"
-                      className="text-blue-400 hover:text-blue-300 text-sm font-mono"
+                      className="text-blue-400 hover:text-blue-300 text-sm"
                     >
-                      View Report →
+                      View Full Report →
                     </a>
                   ) : (
-                    <span className="text-gray-500 text-sm">No IPFS hash</span>
+                    <span className="text-gray-500 text-sm">No IPFS data</span>
                   )}
                 </div>
                 <div>
-                  <p className="text-xs text-gray-400 mb-1">Payout</p>
+                  <p className="text-xs text-gray-400 mb-1">Payout Amount</p>
                   {report.payoutAmount !== null ? (
                     <p className="text-lg font-bold text-green-400">{report.payoutAmount} SOL</p>
                   ) : (
-                    <p className="text-gray-500 text-sm">Pending</p>
+                    <p className="text-gray-500 text-sm">Pending approval</p>
                   )}
                 </div>
               </div>
 
+              {/* Impact & Steps (if available) */}
+              {(report.impact || report.stepsToReproduce) && (
+                <div className="grid md:grid-cols-2 gap-4 mb-4">
+                  {report.impact && (
+                    <div className="p-3 bg-red-900/20 border border-red-800 rounded-lg">
+                      <p className="text-xs text-red-400 mb-1 font-semibold">💥 Impact</p>
+                      <p className="text-gray-300 text-sm">{report.impact}</p>
+                    </div>
+                  )}
+                  {report.stepsToReproduce && (
+                    <div className="p-3 bg-yellow-900/20 border border-yellow-800 rounded-lg">
+                      <p className="text-xs text-yellow-400 mb-1 font-semibold">📝 Steps to Reproduce</p>
+                      <p className="text-gray-300 text-sm whitespace-pre-line">{report.stepsToReproduce}</p>
+                    </div>
+                  )}
+                </div>
+              )}
+
+              {/* Suggested Fix (if available) */}
+              {report.suggestedFix && (
+                <div className="mb-4 p-3 bg-green-900/20 border border-green-800 rounded-lg">
+                  <p className="text-xs text-green-400 mb-1 font-semibold">💡 Suggested Fix</p>
+                  <p className="text-gray-300 text-sm">{report.suggestedFix}</p>
+                </div>
+              )}
+
               {/* Actions - only show for pending reports */}
               {report.status === 'submitted' && (
-                <div className="flex flex-wrap gap-3">
+                <div className="flex flex-wrap gap-3 pt-4 border-t border-gray-700">
                   <Button 
                     variant="primary" 
                     size="sm"
                     onClick={() => handleApprove(report)}
                     disabled={processingReport === report.id}
                   >
-                    {processingReport === report.id ? 'Processing...' : '✓ Approve'}
+                    {processingReport === report.id ? 'Processing...' : '✓ Approve & Pay ' + getExpectedReward(report.severity, report.bountyRewards).toFixed(2) + ' SOL'}
                   </Button>
                   <Button variant="danger" size="sm" disabled={processingReport === report.id}>
                     ✗ Reject
                   </Button>
-                  <Button variant="ghost" size="sm">
-                    View Full Report
-                  </Button>
+                  {report.ipfsHash && (
+                    <a
+                      href={getIPFSGatewayUrl(report.ipfsHash, 'report.json')}
+                      target="_blank"
+                      rel="noopener noreferrer"
+                    >
+                      <Button variant="ghost" size="sm">
+                        📄 View Full Report
+                      </Button>
+                    </a>
+                  )}
                 </div>
               )}
 
               {/* Show approval info for approved reports */}
-              {(report.status === 'approved' || report.status === 'paid') && report.approver && (
-                <div className="text-sm text-gray-400">
-                  Approved by {report.approver}
+              {(report.status === 'approved' || report.status === 'paid') && (
+                <div className="pt-4 border-t border-gray-700">
+                  <div className="flex items-center gap-2 text-green-400">
+                    <span>✅</span>
+                    <span className="text-sm">
+                      Approved {report.approver && `by ${report.approver}`}
+                      {report.payoutAmount !== null && ` • Paid ${report.payoutAmount} SOL`}
+                    </span>
+                  </div>
+                </div>
+              )}
+
+              {/* Show rejection info */}
+              {report.status === 'rejected' && (
+                <div className="pt-4 border-t border-gray-700">
+                  <div className="flex items-center gap-2 text-red-400">
+                    <span>❌</span>
+                    <span className="text-sm">
+                      Rejected {report.approver && `by ${report.approver}`}
+                    </span>
+                  </div>
                 </div>
               )}
             </Card>

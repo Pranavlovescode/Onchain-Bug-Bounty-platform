@@ -177,6 +177,7 @@ export function getIPFSGatewayUrl(cid: string, filename?: string): string {
 
 /**
  * Get alternative gateway URLs for fallback
+ * w3s.link is the Storacha gateway and should be tried first for content uploaded there
  */
 export function getAlternativeGatewayUrls(cid: string, filename?: string): string[] {
   const cleanCid = cid.replace(/^ipfs:\/\//, '');
@@ -184,45 +185,48 @@ export function getAlternativeGatewayUrls(cid: string, filename?: string): strin
   
   return [
     `https://w3s.link/ipfs${path}`,
+    `https://${cleanCid}.ipfs.w3s.link${filename ? `/${filename}` : ''}`,
     `https://dweb.link/ipfs${path}`,
+    `https://${cleanCid}.ipfs.dweb.link${filename ? `/${filename}` : ''}`,
     `https://ipfs.io/ipfs${path}`,
+    `https://gateway.pinata.cloud/ipfs${path}`,
     `https://cloudflare-ipfs.com/ipfs${path}`,
   ];
 }
 
 /**
- * Fetch content from IPFS with fallback gateways
+ * Fetch content from IPFS using server-side proxy (avoids CORS issues)
  * @param cid Content Identifier
  * @param filename Optional filename within CID directory
  * @returns Content as text
  */
 export async function fetchFromIPFS(cid: string, filename?: string): Promise<string> {
-  const urls = getAlternativeGatewayUrls(cid, filename);
+  const cleanCid = cid.replace(/^ipfs:\/\//, '');
   
-  let lastError: Error | null = null;
-  
-  for (const url of urls) {
-    try {
-      const response = await fetch(url, {
-        headers: {
-          'Accept': 'application/json, text/plain, */*',
-        },
-      });
-      
-      if (response.ok) {
-        return response.text();
-      }
-    } catch (error) {
-      lastError = error as Error;
-      console.warn(`Failed to fetch from ${url}, trying next gateway...`);
-    }
+  // Use server-side proxy to avoid CORS issues
+  const params = new URLSearchParams({ cid: cleanCid });
+  if (filename) {
+    params.append('filename', filename);
   }
   
-  throw lastError || new Error('Failed to fetch from all IPFS gateways');
+  const response = await fetch(`/api/ipfs/fetch?${params.toString()}`);
+  
+  if (!response.ok) {
+    const error = await response.json();
+    throw new Error(error.error || 'Failed to fetch from IPFS');
+  }
+  
+  const result = await response.json();
+  
+  if (typeof result.data === 'string') {
+    return result.data;
+  }
+  
+  return JSON.stringify(result.data);
 }
 
 /**
- * Fetch JSON from IPFS
+ * Fetch JSON from IPFS using server-side proxy
  * @param cid Content Identifier
  * @param filename Optional filename (defaults to report.json)
  * @returns Parsed JSON data
@@ -231,8 +235,30 @@ export async function fetchJSONFromIPFS(
   cid: string,
   filename: string = 'report.json'
 ): Promise<Record<string, unknown>> {
-  const text = await fetchFromIPFS(cid, filename);
-  return JSON.parse(text);
+  const cleanCid = cid.replace(/^ipfs:\/\//, '');
+  
+  // Use server-side proxy to avoid CORS issues
+  const params = new URLSearchParams({ cid: cleanCid });
+  if (filename) {
+    params.append('filename', filename);
+  }
+  
+  const response = await fetch(`/api/ipfs/fetch?${params.toString()}`);
+  
+  if (!response.ok) {
+    const error = await response.json();
+    throw new Error(error.error || 'Failed to fetch from IPFS');
+  }
+  
+  const result = await response.json();
+  
+  // Server already parsed JSON if possible
+  if (typeof result.data === 'object') {
+    return result.data;
+  }
+  
+  // Parse if it's a string
+  return JSON.parse(result.data);
 }
 
 /**

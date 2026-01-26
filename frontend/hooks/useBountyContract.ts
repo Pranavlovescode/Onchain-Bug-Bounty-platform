@@ -258,9 +258,24 @@ export function useBountyContract() {
         }
 
         // Convert IPFS hash string to fixed-size byte array [u8; 32]
+        // Store first 32 chars as identifier, register full CID in registry
         const ipfsHashBytes = new Uint8Array(32);
-        const hashBuffer = Buffer.from(ipfsHash);
-        ipfsHashBytes.set(hashBuffer.slice(0, 32));
+        const hashBuffer = Buffer.from(ipfsHash.slice(0, 32));
+        ipfsHashBytes.set(hashBuffer);
+
+        // Register the full CID mapping
+        try {
+          await fetch('/api/ipfs/registry', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({
+              shortHash: ipfsHash.slice(0, 32),
+              fullCid: ipfsHash,
+            }),
+          });
+        } catch (regError) {
+          console.warn('Failed to register CID mapping:', regError);
+        }
 
         // Fetch the vault to get current total_reports for PDA derivation
         const accountNamespace = program.account as any;
